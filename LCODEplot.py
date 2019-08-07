@@ -2,20 +2,18 @@
 
 import sys, os
 import matplotlib as mpl
-mpl.rcParams['axes.formatter.useoffset'] = False
-mpl.rcParams['figure.figsize'] = (6.28, 4)
-mpl.rcParams['figure.dpi'] = 120
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.colors as colors
 import pandas as pd
 from pandas import DataFrame  as df
 import numpy as np
-from collections import namedtuple
-from random import randrange
 from numpy import sqrt, pi
+from random import randrange
+import scipy.stats as stats
 import re
 import h5py
+
 
 #SGC is a default unit system
 e = 4.8032e-10
@@ -67,9 +65,10 @@ class MidpointNormalize(colors.Normalize):
 # BEAM PROFILES
 def Uniform(start=0, length=1):
     def uniform_maker(N):
-        return np.random.uniform(start - length, start, N)
+        return stats.uniform.ppf(np.linspace(0, 1, N+2)[1:-1], start-length, length)
     uniform_maker.med = start - length/2.
     uniform_maker.sigma = length
+    uniform_maker.f0 = 1. / length 
     return uniform_maker
 
 def rUniform(width=1):
@@ -81,14 +80,15 @@ def rUniform(width=1):
 
 def Gauss(med=0, sigma=1):
     def gauss_maker(N):
-        return np.random.normal(med, sigma, N)
+        return stats.norm.ppf(np.linspace(0, 1, N+2)[1:-1], med, sigma)
     gauss_maker.med = med
     gauss_maker.sigma = sigma
+    gauss_maker.f0 = 1. / sqrt(2*pi) / sigma
     return gauss_maker
 
 def rGauss(sigma=1):
     def rgauss_maker(N):
-        return sigma*np.sqrt(2.)*np.random.weibull(2, N)
+        return sigma*np.sqrt(2.)*stats.weibull_min.ppf(np.linspace(0, 1, N+2)[1:-1], 2)
     rgauss_maker.med = 0
     rgauss_maker.sigma = sigma
     return rgauss_maker
@@ -243,31 +243,48 @@ class LCODEplot():
         q = 2.*Ipeak_kA/I0/partic_in_layer
         stub_particle = np.array([[-100000., 0., 0., 0., 0., 1.0, 0., 0.]])
         gamma = pz_distr.med
-        N = 10000
-        while True:
-            xi = xi_distr(N)
-            print('Trying', N, 'particles')
-            xi = xi[(-self.xi_size <= xi)]# & (xi <= 0)]
-            if np.sum((xi_distr.med - xi_step/2 < xi) & (xi < xi_distr.med + xi_step/2)) < partic_in_layer:
-                print(N, 'is not enough:', np.sum((xi_distr.med - xi_step < xi) & (xi < xi_distr.med)))
-                N *= 10
-                continue
-            until_middle_layer_filled = [np.cumsum((xi_distr.med - xi_step < xi) & (xi < xi_distr.med)) <= partic_in_layer]
-            xi = xi[until_middle_layer_filled]
-            K = xi.shape[0]
-            print(K, 'is enough')
-            xi = np.sort(xi)[::-1]
-            r = np.abs(r_distr(K))
-            pz = pz_distr(K)
-            pr = gamma * ang_distr(K)
-            M = gamma * ang_distr(K) * r
-            particles = np.array([xi, r, pz, pr, M, q_m * np.ones(K), q * np.ones(K), np.arange(K)])
-            beam = np.vstack([particles.T, stub_particle])
-            break
+#         N = 10000
+#         while True:
+#             xi = xi_distr(N)
+#             print('Trying', N, 'particles')
+#             xi = xi[(-self.xi_size <= xi)]# & (xi <= 0)]
+#             if np.sum((xi_distr.med - xi_step/2 < xi) & (xi < xi_distr.med + xi_step/2)) < partic_in_layer:
+#                 print(N, 'is not enough:', np.sum((xi_distr.med - xi_step < xi) & (xi < xi_distr.med)))
+#                 N *= 10
+#                 continue
+#             until_middle_layer_filled = [np.cumsum((xi_distr.med - xi_step < xi) & (xi < xi_distr.med)) <= partic_in_layer]
+#             xi = xi[until_middle_layer_filled]
+#             K = xi.shape[0]
+#             print(K, 'is enough')
+#             xi = np.sort(xi)[::-1]
+#             r = np.abs(r_distr(K))
+#             pz = pz_distr(K)
+#             pr = gamma * ang_distr(K)
+#             M = gamma * ang_distr(K) * r
+#             particles = np.array([xi, r, pz, pr, M, q_m * np.ones(K), q * np.ones(K), np.arange(K)])
+#             beam = np.vstack([particles.T, stub_particle])
+#             break
+        
+        N = partic_in_layer / self.xi_step / xi_distr.f0
+        N = int(round(N))
+        xi = xi_distr(N)
+        partic_in_mid_layer = np.sum((xi > xi_distr.med - self.xi_step/2) & (xi < xi_distr.med + self.xi_step/2))
+        print('Number of particles:', N)
+        print('Number of particles in the middle layer:', partic_in_mid_layer)
+        xi = np.sort(xi)[::-1]
+        r = np.abs(r_distr(N))
+        np.random.shuffle(r)
+        pz = pz_distr(N)
+        np.random.shuffle(pz)
+        pr = gamma * ang_distr(N)
+        np.random.shuffle(pr)
+        M = gamma * ang_distr(N) * r
+        np.random.shuffle(M)
+        particles = np.array([xi, r, pz, pr, M, q_m * np.ones(N), q * np.ones(N), np.arange(N)])
+        beam = np.vstack([particles.T, stub_particle])
         beam = df(beam, columns=['xi', 'r', 'pz', 'pr', 'M', 'q_m', 'q', 'N'])
         head = beam[beam.eval('xi>0')]
         beam = beam[beam.eval('xi<=0')]
-        #beam.sort_values('xi', inplace=True, ascending=False)
         if saveto:
             beam.values.tofile(os.path.join(saveto, name))
             head.values.tofile(os.path.join(saveto, 'head-' + name))

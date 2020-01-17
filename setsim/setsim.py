@@ -80,23 +80,22 @@ def make_plasma(lcode, n_plasma, plasma_length, plasma_radius, n_profile):
 #------------------------------
 # Beamfile construction module
 #------------------------------
-def Q2I(Q, sigma_z): # SI (return Amps)
+def Q2I(Q, sigma_z): # SI (returns Amps)
     return c/100. * Q / np.sqrt(2*np.pi) / sigma_z
-def make_beam(lcode, sigma_z, pos_xi, sigma_r, gamma, enspread, emittance, N_particles):
+def make_beam(lcode, sigma_z, pos_xi, sigma_r, p0, enspread, emittance, N_particles, q_m=m_MeV/M_MeV, q_e=1):
     print("# BEAM")
-    q_m = m_MeV/M_MeV
     # xi
     xi_shape = Gauss(pos_xi, sigma_z)
     # r
     r_shape = rGauss(sigma_r)
     # pz
-    pz_shape = Gauss(gamma, enspread)
+    pz_shape = Gauss(p0, enspread)
     # angle
-    angspread = emittance / (gamma / (M_MeV/m_MeV) * sigma_r)
+    angspread = emittance / (p0 * q_m * sigma_r)
     #print('%e' % angspread)
     ang_shape = Gauss(0, angspread)
     # current
-    Ipeak_A = Q2I(N_particles*e/3e9, sigma_z*lcode.cwp/100)
+    Ipeak_A = Q2I(N_particles*e*q_e/3e9, sigma_z*lcode.cwp/100)
     Ipeak_kA = Ipeak_A/1000
     print('Peak current {:.2f} A'.format(Ipeak_A))
     lcode.beam = lcode.make_beam(xi_shape, r_shape, pz_shape, ang_shape, Ipeak_kA, q_m, saveto=lcode.path)
